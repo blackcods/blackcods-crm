@@ -10,6 +10,8 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.24.7/babel.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
 <style>
 :root{
   --bg:#F8F7F2;
@@ -203,7 +205,91 @@ tr.clickable:hover{background:var(--surface-alt);cursor:pointer;}
 <body>
 <div id="root"></div>
 <script type="text/babel" data-presets="react">
-const {useState,useMemo} = React;
+const {useState,useMemo,useEffect} = React;
+
+/* Persist state to localStorage so data survives refresh/logout on the deployed site.
+   (Falls back silently to in-memory-only if storage is unavailable, e.g. private/sandboxed preview.) */
+function usePersistentState(key, initialValue){
+  const storageKey = "blackcods_crm_v1_" + key;
+  const [state, setState] = useState(() => {
+    try{
+      const stored = window.localStorage.getItem(storageKey);
+      return stored !== null ? JSON.parse(stored) : initialValue;
+    }catch(e){ return initialValue; }
+  });
+  useEffect(() => {
+    try{ window.localStorage.setItem(storageKey, JSON.stringify(state)); }catch(e){ /* storage unavailable */ }
+  }, [state]);
+  return [state, setState];
+}
+function clearAllPersistedData(){
+  try{
+    Object.keys(window.localStorage)
+      .filter(k => k.startsWith("blackcods_crm_v1_"))
+      .forEach(k => window.localStorage.removeItem(k));
+  }catch(e){}
+}
+
+/* ============================================================
+   FIREBASE SETUP — paste your own project's config below.
+   Get this from: Firebase Console > Project settings > General > "Your apps" > SDK setup and configuration
+   Until you fill this in with real values, the app runs in local-only mode (no cross-device sync).
+   ============================================================ */
+const firebaseConfig = {
+  apiKey: "AIzaSyB78qGJaqfESXaTdKK28a2mf-h9HK2Pe3E",
+  authDomain: "blackcods-crm.firebaseapp.com",
+  projectId: "blackcods-crm",
+  storageBucket: "blackcods-crm.firebasestorage.app",
+  messagingSenderId: "758023427334",
+  appId: "1:758023427334:web:4143a82e0d5babaedefa87",
+};
+
+let firestoreDb = null;
+let firebaseEnabled = false;
+try{
+  if(firebaseConfig.apiKey && firebaseConfig.apiKey !== "YOUR_API_KEY" && window.firebase){
+    firebase.initializeApp(firebaseConfig);
+    firestoreDb = firebase.firestore();
+    firebaseEnabled = true;
+  }
+}catch(e){ console.error("Firebase init failed:", e); firebaseEnabled = false; }
+
+/* Syncs state to a shared Firestore document in real time (all devices see the same data instantly).
+   Falls back to this browser's local storage only if Firebase isn't configured, so the app still works either way. */
+function useSyncedState(key, initialValue){
+  const [state, setLocalState] = usePersistentState(key, initialValue);
+  const [synced, setSynced] = useState(false);
+
+  useEffect(() => {
+    if(!firebaseEnabled) return;
+    const ref = firestoreDb.collection("blackcods_crm").doc(key);
+    const unsub = ref.onSnapshot(
+      (snap) => {
+        if(snap.exists){
+          setLocalState(snap.data().value);
+        } else {
+          ref.set({value: initialValue}).catch(e=>console.error(e));
+        }
+        setSynced(true);
+      },
+      (err) => { console.error("Firestore sync error for "+key+":", err); setSynced(false); }
+    );
+    return unsub;
+    // eslint-disable-next-line
+  }, []);
+
+  const setState = (updater) => {
+    setLocalState(prev => {
+      const resolved = typeof updater === "function" ? updater(prev) : updater;
+      if(firebaseEnabled){
+        firestoreDb.collection("blackcods_crm").doc(key).set({value: resolved}).catch(e=>console.error(e));
+      }
+      return resolved;
+    });
+  };
+
+  return [state, setState, synced];
+}
 
 /* =================== CONFIG (not customer data — app configuration) =================== */
 const ROLES = {
@@ -1613,7 +1699,8 @@ function ApiDocs(){
 }
 
 /* =================== SETTINGS =================== */
-function Settings(){
+function Settings({notify}){
+  const [confirming,setConfirming] = useState(false);
   return (
     <div className="grid-2">
       <div className="card">
@@ -1629,6 +1716,35 @@ function Settings(){
         <div className="panel-body">
           <Field label="Live API Key"><input className="input-sm" style={{width:"100%"}} placeholder="Click Generate to create a key" readOnly/></Field>
           <Field label="WhatsApp Business Number"><input className="input-sm" style={{width:"100%"}} placeholder="+91 90000 12345"/></Field>
+        </div>
+      </div>
+      <div className="card">
+        <div className="panel-head"><div className="section-title">Data Storage & Sync</div></div>
+        <div className="panel-body">
+          <div className={"import-summary "+(firebaseEnabled?"":"error")} style={{marginBottom:14}}>
+            {firebaseEnabled
+              ? "✓ Connected to Firebase — Leads, Customers, Invoices, Tickets and Campaigns sync across every device in real time."
+              : "Not connected to a shared database. Leads, Customers, Invoices, Tickets and Campaigns are only saved in this browser and won't appear on other devices."}
+          </div>
+          <div style={{fontSize:12.5,color:"var(--ink-soft)",marginBottom:14,lineHeight:1.6}}>
+            Team member logins stay saved to each device individually for now (not synced), since they currently include plain-text passwords — syncing those safely needs Firebase Authentication as a follow-up step rather than the open database used for business records.
+          </div>
+          {!firebaseEnabled && (
+            <div style={{fontSize:12,color:"var(--ink-soft)",lineHeight:1.7,marginBottom:14}}>
+              <b>To turn on multi-device sync:</b> open this file's code, find the <code>firebaseConfig</code> object near the top of the script, and paste in your own Firebase project's config values (from Firebase Console → Project settings → Your apps). Then also set your Firestore security rules to allow read/write on the <code>blackcods_crm</code> collection. Ask me if you want the exact rules text or a walkthrough of the Firebase Console.
+            </div>
+          )}
+          {!confirming ? (
+            <button className="btn btn-danger btn-sm" onClick={()=>setConfirming(true)}>Reset All Data</button>
+          ) : (
+            <div>
+              <div className="import-summary error">This will permanently delete all leads, customers, invoices, tickets, campaigns and team members saved in this browser, and log you out. This can't be undone.</div>
+              <div style={{display:"flex",gap:8}}>
+                <button className="btn btn-danger btn-sm" onClick={()=>{clearAllPersistedData(); window.location.reload();}}>Yes, reset everything</button>
+                <button className="btn btn-outline btn-sm" onClick={()=>setConfirming(false)}>Cancel</button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -1709,16 +1825,16 @@ const TITLES = {
 };
 
 function App(){
-  const [session,setSession] = useState(null); // {type:"employee", id} | {type:"customer", id}
+  const [session,setSession] = usePersistentState("session", null); // {type:"employee", id} | {type:"customer", id}
   const [page,setPage] = useState("dashboard");
   const [toasts,setToasts] = useState([]);
 
-  const [leads,setLeads] = useState([]);
-  const [customers,setCustomers] = useState([]);
-  const [invoices,setInvoices] = useState([]);
-  const [tickets,setTickets] = useState([]);
-  const [campaigns,setCampaigns] = useState([]);
-  const [employees,setEmployees] = useState([SEED_ADMIN]);
+  const [leads,setLeads,leadsSynced] = useSyncedState("leads", []);
+  const [customers,setCustomers,customersSynced] = useSyncedState("customers", []);
+  const [invoices,setInvoices] = useSyncedState("invoices", []);
+  const [tickets,setTickets] = useSyncedState("tickets", []);
+  const [campaigns,setCampaigns] = useSyncedState("campaigns", []);
+  const [employees,setEmployees] = usePersistentState("employees", [SEED_ADMIN]);
 
   const notify = (msg) => {
     const id = Date.now()+Math.random();
@@ -1774,7 +1890,7 @@ function App(){
       case "reports": return <Reports leads={leads} invoices={invoices} customers={customers} employees={employees}/>;
       case "automation": return <Automation notify={notify}/>;
       case "apidocs": return <ApiDocs/>;
-      case "settings": return <Settings/>;
+      case "settings": return <Settings notify={notify}/>;
       default: return null;
     }
   };
@@ -1805,6 +1921,10 @@ function App(){
           </div>
         ))}
         <div className="sidebar-foot">
+          <div style={{fontSize:10.5,display:"flex",alignItems:"center",gap:5,marginBottom:8,color:firebaseEnabled?"#7fd99a":"#c9c7ba"}}>
+            <span style={{width:6,height:6,borderRadius:"50%",background:firebaseEnabled?"#3ecb6b":"#6f6f63",display:"inline-block"}}></span>
+            {firebaseEnabled ? "Synced across devices" : "Local only — see Settings"}
+          </div>
           <div className="role-pill">{ROLES[currentEmployee.role].label}</div>
           <div className="user-chip">
             <div className="user-avatar">{currentEmployee.name[0]}</div>
