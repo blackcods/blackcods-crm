@@ -112,6 +112,16 @@ tr.clickable:hover{background:var(--surface-alt);cursor:pointer;}
 .b-low{background:var(--surface-alt);color:var(--muted);}
 .b-medium{background:var(--gold-soft);color:var(--gold-deep);}
 .b-high{background:var(--danger-soft);color:var(--danger);}
+.b-hold{background:#EFE3D0;color:#8A5A1C;}
+.b-finished{background:var(--surface-alt);color:var(--muted);}
+.star-btn{cursor:pointer;font-size:15px;color:var(--border);}
+.star-btn.active{color:var(--gold);}
+.row-actions{display:flex;gap:5px;}
+.icon-btn{border:1px solid var(--border);background:var(--surface);border-radius:6px;width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;font-size:12px;color:var(--ink-soft);}
+.icon-btn:hover{border-color:var(--gold-deep);color:var(--gold-deep);}
+.icon-btn.danger:hover{border-color:var(--danger);color:var(--danger);}
+.rate-row{display:grid;grid-template-columns:1fr 1fr auto;gap:8px;margin-bottom:8px;align-items:center;}
+.pricing-toggle{display:flex;gap:6px;margin-bottom:12px;}
 
 .pill-row{display:flex;gap:6px;flex-wrap:wrap;}
 .filter-pill{font-size:12px;padding:6px 12px;border-radius:20px;border:1px solid var(--border);background:var(--surface);cursor:pointer;color:var(--ink-soft);}
@@ -356,6 +366,26 @@ const SERVICES_LIST = [
   {id:"S9",name:"Marketing Automation",price:6000,unit:"/month"},
   {id:"S10",name:"CRM License",price:1999,unit:"/month"},
 ];
+// Default pricing detail per service — editable from the Services page. Recurring = rental cycles, Usage = per-message rate cards, Onetime = flat fee.
+const DEFAULT_SERVICE_PRICING = {
+  S1: {type:"recurring", recurring:{monthly:2500, halfyearly:13500, yearly:24000}},
+  S2: {type:"recurring", recurring:{monthly:4000, halfyearly:21600, yearly:38400}},
+  S3: {type:"usage", rates:[{category:"Transactional",rate:0.18},{category:"Promotional",rate:0.22},{category:"OTP",rate:0.15}]},
+  S4: {type:"usage", rates:[{category:"Standard",rate:0.35}]},
+  S5: {type:"recurring", recurring:{monthly:3500, halfyearly:18900, yearly:33600}},
+  S6: {type:"recurring", recurring:{monthly:15000, halfyearly:81000, yearly:144000}},
+  S7: {type:"onetime", amount:25000},
+  S8: {type:"onetime", amount:8000},
+  S9: {type:"recurring", recurring:{monthly:6000, halfyearly:32400, yearly:57600}},
+  S10:{type:"recurring", recurring:{monthly:1999, halfyearly:10794, yearly:19188}},
+};
+function servicePriceLabel(p){
+  if(!p) return "—";
+  if(p.type==="recurring") return inr(p.recurring.monthly)+"/mo · "+inr(p.recurring.halfyearly)+"/6mo · "+inr(p.recurring.yearly)+"/yr";
+  if(p.type==="usage") return p.rates.map(r=>r.category+": "+inr(r.rate)+"/msg").join(" · ");
+  if(p.type==="onetime") return inr(p.amount)+" one-time";
+  return "—";
+}
 const WA_TEMPLATES = [
   {name:"welcome_new_lead",body:"Hi {{name}}, thanks for your interest in Blackcods {{service}}! Our executive {{exec}} will reach out shortly.",status:"Approved"},
   {name:"followup_reminder",body:"Hi {{name}}, just checking in regarding {{service}}. Would you like to schedule a quick call?",status:"Approved"},
@@ -374,7 +404,8 @@ const AUTOMATIONS_DEFAULT = [
 
 function badgeClass(status){
   const map = {New:"b-new",Contacted:"b-contacted",Interested:"b-interested",Demo:"b-demo",Proposal:"b-proposal",Negotiation:"b-negotiation",Converted:"b-converted",Lost:"b-lost",
-  Active:"b-active",Paid:"b-paid",Unpaid:"b-unpaid",Overdue:"b-overdue",Pending:"b-pending","In Progress":"b-progress",Resolved:"b-resolved",Open:"b-open",Low:"b-low",Medium:"b-medium",High:"b-high"};
+  Active:"b-active",Paid:"b-paid",Unpaid:"b-unpaid",Overdue:"b-overdue",Pending:"b-pending","In Progress":"b-progress",Resolved:"b-resolved",Open:"b-open",Low:"b-low",Medium:"b-medium",High:"b-high",
+  Hold:"b-hold",Finished:"b-finished"};
   return "badge " + (map[status] || "b-new");
 }
 function inr(n){return "₹" + Number(n||0).toLocaleString("en-IN");}
@@ -604,13 +635,13 @@ function Dashboard({leads,customers,invoices,campaigns}){
 }
 
 /* =================== ADD LEAD MODAL =================== */
-function LeadFormModal({onClose,onSave,employees}){
-  const [f,setF] = useState({name:"",company:"",mobile:"",email:"",location:"",source:SOURCES[0],serviceInterest:SERVICES_LIST[0].name,assigned:"",nextFollowup:"",notes:""});
+function LeadFormModal({onClose,onSave,employees,editing}){
+  const [f,setF] = useState(editing || {name:"",company:"",mobile:"",email:"",location:"",source:SOURCES[0],serviceInterest:SERVICES_LIST[0].name,assigned:"",nextFollowup:"",notes:"",priority:false});
   const set = (k,v)=>setF({...f,[k]:v});
   const execs = employees.filter(e=>e.access.includes("leads"));
   return (
     <Modal onClose={onClose}>
-      <div className="drawer-head"><h3 style={{fontSize:17}}>New Lead</h3><button className="close-x" onClick={onClose}>✕</button></div>
+      <div className="drawer-head"><h3 style={{fontSize:17}}>{editing?"Edit Lead":"New Lead"}</h3><button className="close-x" onClick={onClose}>✕</button></div>
       <div className="drawer-body">
         <div className="field-grid">
           <Field label="Name"><input className="input-sm" style={{width:"100%"}} value={f.name} onChange={e=>set("name",e.target.value)}/></Field>
@@ -636,9 +667,12 @@ function LeadFormModal({onClose,onSave,employees}){
           </Field>
           <Field label="Next Follow-up"><input type="date" className="input-sm" style={{width:"100%"}} value={f.nextFollowup} onChange={e=>set("nextFollowup",e.target.value)}/></Field>
         </div>
+        <label className={"perm-check "+(f.priority?"checked":"")} style={{display:"inline-flex",marginBottom:14}}>
+          <input type="checkbox" checked={!!f.priority} onChange={e=>set("priority",e.target.checked)}/> ★ Mark as Priority Lead
+        </label>
         <Field label="Notes"><textarea className="input-sm" style={{width:"100%",minHeight:60}} value={f.notes} onChange={e=>set("notes",e.target.value)}/></Field>
         <div style={{display:"flex",gap:8,marginTop:6}}>
-          <button className="btn btn-primary" disabled={!f.name||!f.mobile} onClick={()=>onSave(f)}>Save Lead</button>
+          <button className="btn btn-primary" disabled={!f.name||!f.mobile} onClick={()=>onSave(f)}>{editing?"Save Changes":"Save Lead"}</button>
           <button className="btn btn-outline" onClick={onClose}>Cancel</button>
         </div>
       </div>
@@ -647,21 +681,41 @@ function LeadFormModal({onClose,onSave,employees}){
 }
 
 /* =================== LEAD DETAIL =================== */
-function LeadDetail({lead,onClose,notify,onUpdate}){
+function LeadDetail({lead,onClose,notify,onUpdate,onEdit,onDelete}){
   const [tab,setTab] = useState("details");
   const [note,setNote] = useState("");
+  const [confirmDelete,setConfirmDelete] = useState(false);
   if(!lead) return null;
   return (
     <Drawer onClose={onClose} width={480}>
       <div className="drawer-head">
         <div>
           <div style={{fontSize:11,color:"var(--muted)"}}>{lead.id}</div>
-          <h3 style={{fontSize:18}}>{lead.name}</h3>
-          <div style={{marginTop:6}}><Badge>{lead.stage}</Badge></div>
+          <h3 style={{fontSize:18,display:"flex",alignItems:"center",gap:8}}>
+            {lead.name}
+            <span className={"star-btn "+(lead.priority?"active":"")} title="Toggle priority" onClick={()=>onUpdate(lead.id,{priority:!lead.priority})}>★</span>
+          </h3>
+          <div style={{marginTop:6,display:"flex",gap:6}}>
+            <Badge>{lead.stage}</Badge>
+            {lead.onHold && <Badge>Hold</Badge>}
+            {lead.priority && <span className="tag-pill">Priority</span>}
+          </div>
         </div>
         <button className="close-x" onClick={onClose}>✕</button>
       </div>
       <div className="drawer-body">
+        <div style={{display:"flex",gap:8,marginBottom:16}}>
+          <button className="btn btn-outline btn-sm" onClick={onEdit}>Edit</button>
+          <button className="btn btn-outline btn-sm" onClick={()=>{onUpdate(lead.id,{onHold:!lead.onHold}); notify(lead.onHold?"Lead resumed":"Lead put on hold");}}>{lead.onHold?"Resume":"Hold"}</button>
+          {!confirmDelete ? (
+            <button className="btn btn-danger btn-sm" onClick={()=>setConfirmDelete(true)}>Delete</button>
+          ) : (
+            <>
+              <button className="btn btn-danger btn-sm" onClick={onDelete}>Confirm Delete</button>
+              <button className="btn btn-ghost btn-sm" onClick={()=>setConfirmDelete(false)}>Cancel</button>
+            </>
+          )}
+        </div>
         <div className="tabs">
           <div className={"tab "+(tab==="details"?"active":"")} onClick={()=>setTab("details")}>Details</div>
           <div className={"tab "+(tab==="notes"?"active":"")} onClick={()=>setTab("notes")}>Notes</div>
@@ -710,13 +764,16 @@ function Leads({leads,setLeads,employees,notify}){
   const [view,setView] = useState("table");
   const [q,setQ] = useState("");
   const [source,setSource] = useState("All");
+  const [statusFilter,setStatusFilter] = useState("All");
   const [selected,setSelected] = useState(null);
   const [showForm,setShowForm] = useState(false);
+  const [editingLead,setEditingLead] = useState(null);
   const [importing,setImporting] = useState(false);
   const [importMsg,setImportMsg] = useState(null);
 
   const filtered = leads.filter(l =>
     (source==="All"||l.source===source) &&
+    (statusFilter==="All" || (statusFilter==="Priority" && l.priority) || (statusFilter==="Hold" && l.onHold)) &&
     (q==="" || l.name.toLowerCase().includes(q.toLowerCase()) || (l.company||"").toLowerCase().includes(q.toLowerCase()) || l.mobile.includes(q))
   );
 
@@ -726,13 +783,27 @@ function Leads({leads,setLeads,employees,notify}){
     setShowForm(false);
     notify("Lead added — welcome WhatsApp queued");
   };
-  const updateLead = (id,patch) => setLeads(leads.map(l=>l.id===id?{...l,...patch}:l));
+  const saveEditedLead = (f) => {
+    setLeads(leads.map(l=>l.id===f.id?f:l));
+    setEditingLead(null);
+    setSelected(prev => prev && prev.id===f.id ? f : prev);
+    notify("Lead updated");
+  };
+  const updateLead = (id,patch) => {
+    setLeads(leads.map(l=>l.id===id?{...l,...patch}:l));
+    setSelected(prev => prev && prev.id===id ? {...prev,...patch} : prev);
+  };
+  const deleteLead = (id) => {
+    setLeads(leads.filter(l=>l.id!==id));
+    setSelected(null);
+    notify("Lead deleted");
+  };
 
   const exportLeads = () => {
     const rows = leads.map(l=>({
       "Lead ID":l.id,"Name":l.name,"Company":l.company||"","Mobile":l.mobile,"Email":l.email||"",
       "Location":l.location||"","Source":l.source,"Service Interested":l.serviceInterest,
-      "Stage":l.stage,"Assigned Executive":l.assigned||"","Created":l.created,
+      "Stage":l.stage,"Priority":l.priority?"Yes":"No","On Hold":l.onHold?"Yes":"No","Assigned Executive":l.assigned||"","Created":l.created,
       "Next Follow-up":l.nextFollowup||"","Notes":l.notes||""
     }));
     exportRows("leads-export.xlsx", rows, "Leads");
@@ -788,6 +859,11 @@ function Leads({leads,setLeads,employees,notify}){
             <span className={"filter-pill "+(source==="All"?"active":"")} onClick={()=>setSource("All")}>All Sources</span>
             {SOURCES.map(s=><span key={s} className={"filter-pill "+(source===s?"active":"")} onClick={()=>setSource(s)}>{s}</span>)}
           </div>
+          <div className="pill-row">
+            <span className={"filter-pill "+(statusFilter==="All"?"active":"")} onClick={()=>setStatusFilter("All")}>All</span>
+            <span className={"filter-pill "+(statusFilter==="Priority"?"active":"")} onClick={()=>setStatusFilter("Priority")}>★ Priority</span>
+            <span className={"filter-pill "+(statusFilter==="Hold"?"active":"")} onClick={()=>setStatusFilter("Hold")}>Hold</span>
+          </div>
         </div>
         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
           <button className={"btn btn-sm "+(view==="table"?"btn-primary":"btn-outline")} onClick={()=>setView("table")}>List</button>
@@ -810,13 +886,21 @@ function Leads({leads,setLeads,employees,notify}){
       ) : view==="table" ? (
         <div className="card">
           <table>
-            <thead><tr><th>Lead</th><th>Company</th><th>Contact</th><th>Source</th><th>Service</th><th>Stage</th><th>Assigned</th><th>Next Follow-up</th></tr></thead>
+            <thead><tr><th></th><th>Lead</th><th>Company</th><th>Contact</th><th>Source</th><th>Service</th><th>Stage</th><th>Assigned</th><th>Next Follow-up</th><th></th></tr></thead>
             <tbody>
               {filtered.map(l=>(
-                <tr key={l.id} className="clickable" onClick={()=>setSelected(l)}>
-                  <td><div style={{fontWeight:600}}>{l.name}</div><div style={{fontSize:11,color:"var(--muted)"}}>{l.id}</div></td>
-                  <td>{l.company||"—"}</td><td>{l.mobile}</td><td>{l.source}</td><td>{l.serviceInterest}</td>
-                  <td><Badge>{l.stage}</Badge></td><td>{l.assigned||"Unassigned"}</td><td>{l.nextFollowup||"—"}</td>
+                <tr key={l.id} className="clickable">
+                  <td onClick={e=>e.stopPropagation()}><span className={"star-btn "+(l.priority?"active":"")} onClick={()=>updateLead(l.id,{priority:!l.priority})}>★</span></td>
+                  <td onClick={()=>setSelected(l)}><div style={{fontWeight:600}}>{l.name}</div><div style={{fontSize:11,color:"var(--muted)"}}>{l.id}</div></td>
+                  <td onClick={()=>setSelected(l)}>{l.company||"—"}</td><td onClick={()=>setSelected(l)}>{l.mobile}</td><td onClick={()=>setSelected(l)}>{l.source}</td><td onClick={()=>setSelected(l)}>{l.serviceInterest}</td>
+                  <td onClick={()=>setSelected(l)}><div style={{display:"flex",gap:5}}><Badge>{l.stage}</Badge>{l.onHold && <Badge>Hold</Badge>}</div></td>
+                  <td onClick={()=>setSelected(l)}>{l.assigned||"Unassigned"}</td><td onClick={()=>setSelected(l)}>{l.nextFollowup||"—"}</td>
+                  <td onClick={e=>e.stopPropagation()}>
+                    <div className="row-actions">
+                      <button className="icon-btn" title="Edit" onClick={()=>setEditingLead(l)}>✎</button>
+                      <button className="icon-btn danger" title="Delete" onClick={()=>{if(window.confirm("Delete lead "+l.name+"?")) deleteLead(l.id);}}>🗑</button>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -830,15 +914,16 @@ function Leads({leads,setLeads,employees,notify}){
               <div className="board-col-head"><span>{st}</span><span>{filtered.filter(l=>l.stage===st).length}</span></div>
               {filtered.filter(l=>l.stage===st).map(l=>(
                 <div className="kcard" key={l.id} onClick={()=>setSelected(l)}>
-                  <div className="kcard-name">{l.name}</div><div className="kcard-meta">{l.serviceInterest}</div><div className="kcard-meta">{l.assigned||"Unassigned"}</div>
+                  <div className="kcard-name">{l.priority && "★ "}{l.name}</div><div className="kcard-meta">{l.serviceInterest}</div><div className="kcard-meta">{l.assigned||"Unassigned"}</div>
                 </div>
               ))}
             </div>
           ))}
         </div>
       )}
-      {selected && <LeadDetail lead={selected} onClose={()=>setSelected(null)} notify={notify} onUpdate={updateLead}/>}
+      {selected && <LeadDetail lead={selected} onClose={()=>setSelected(null)} notify={notify} onUpdate={updateLead} onEdit={()=>{setEditingLead(selected); setSelected(null);}} onDelete={()=>deleteLead(selected.id)}/>}
       {showForm && <LeadFormModal onClose={()=>setShowForm(false)} onSave={addLead} employees={employees}/>}
+      {editingLead && <LeadFormModal editing={editingLead} onClose={()=>setEditingLead(null)} onSave={saveEditedLead} employees={employees}/>}
     </div>
   );
 }
@@ -908,14 +993,14 @@ function Deals({leads}){
 }
 
 /* =================== ADD CUSTOMER MODAL =================== */
-function CustomerFormModal({onClose,onSave}){
-  const [f,setF] = useState({name:"",company:"",mobile:"",email:"",plan:"Starter",services:[],startDate:today(),renewalDate:"",wallet:0,messageQuota:10000,username:"",password:""});
+function CustomerFormModal({onClose,onSave,editing}){
+  const [f,setF] = useState(editing || {name:"",company:"",mobile:"",email:"",plan:"Starter",services:[],startDate:today(),renewalDate:"",wallet:0,messageQuota:10000,username:"",password:"",priority:false});
   const set=(k,v)=>setF({...f,[k]:v});
   const toggleService = (name) => set("services", f.services.includes(name) ? f.services.filter(s=>s!==name) : [...f.services,name]);
   const suggestUsername = () => set("username", (f.email.split("@")[0] || f.mobile || f.name.toLowerCase().replace(/[^a-z0-9]/g,"")));
   return (
     <Modal onClose={onClose}>
-      <div className="drawer-head"><h3 style={{fontSize:17}}>New Customer</h3><button className="close-x" onClick={onClose}>✕</button></div>
+      <div className="drawer-head"><h3 style={{fontSize:17}}>{editing?"Edit Customer":"New Customer"}</h3><button className="close-x" onClick={onClose}>✕</button></div>
       <div className="drawer-body">
         <div className="field-grid">
           <Field label="Name"><input className="input-sm" style={{width:"100%"}} value={f.name} onChange={e=>set("name",e.target.value)}/></Field>
@@ -936,6 +1021,9 @@ function CustomerFormModal({onClose,onSave}){
             ))}
           </div>
         </Field>
+        <label className={"perm-check "+(f.priority?"checked":"")} style={{display:"inline-flex",marginBottom:14}}>
+          <input type="checkbox" checked={!!f.priority} onChange={e=>set("priority",e.target.checked)}/> ★ Mark as Important Client
+        </label>
         <div className="field-grid">
           <Field label="Portal Username (optional)">
             <div style={{display:"flex",gap:6}}>
@@ -952,7 +1040,7 @@ function CustomerFormModal({onClose,onSave}){
         </div>
         <div style={{fontSize:11,color:"var(--muted)",marginTop:-8,marginBottom:14}}>Leave blank to skip giving this customer portal access for now — you can add it later by editing the customer.</div>
         <div style={{display:"flex",gap:8,marginTop:6}}>
-          <button className="btn btn-primary" disabled={!f.name||!f.mobile} onClick={()=>onSave(f)}>Save Customer</button>
+          <button className="btn btn-primary" disabled={!f.name||!f.mobile} onClick={()=>onSave(f)}>{editing?"Save Changes":"Save Customer"}</button>
           <button className="btn btn-outline" onClick={onClose}>Cancel</button>
         </div>
       </div>
@@ -961,17 +1049,56 @@ function CustomerFormModal({onClose,onSave}){
 }
 
 /* =================== CUSTOMER DETAIL =================== */
-function CustomerDetail({cust,onClose,notify,invoices}){
+function CustomerDetail({cust,onClose,notify,invoices,onUpdate,onEdit,onDelete}){
   const [tab,setTab] = useState("overview");
+  const [topupAmount,setTopupAmount] = useState("");
+  const [confirmDelete,setConfirmDelete] = useState(false);
+  const [balanceCheck,setBalanceCheck] = useState(null);
   if(!cust) return null;
   const custInvoices = invoices.filter(i=>i.customer===cust.name);
+
+  const doTopup = () => {
+    const amt = Number(topupAmount);
+    if(!amt || amt<=0) return;
+    onUpdate(cust.id,{wallet:(cust.wallet||0)+amt});
+    notify("Added "+inr(amt)+" to "+cust.name+"'s wallet");
+    setTopupAmount("");
+  };
+  const checkBalanceApi = () => {
+    // Simulates GET /customers/{id}/renewal-status from the API docs
+    setBalanceCheck({
+      customer_id: cust.id, plan: cust.plan, renewal_date: cust.renewalDate || null,
+      wallet_balance: cust.wallet, message_usage: cust.messageUsage||0, message_quota: cust.messageQuota, status: cust.status,
+    });
+    notify("Fetched latest balance via API");
+  };
+
   return (
     <Drawer onClose={onClose} width={500}>
       <div className="drawer-head">
-        <div><div style={{fontSize:11,color:"var(--muted)"}}>{cust.id}</div><h3 style={{fontSize:18}}>{cust.name}</h3><div style={{fontSize:12,color:"var(--muted)"}}>{cust.company}</div></div>
+        <div>
+          <div style={{fontSize:11,color:"var(--muted)"}}>{cust.id}</div>
+          <h3 style={{fontSize:18,display:"flex",alignItems:"center",gap:8}}>
+            {cust.name}
+            <span className={"star-btn "+(cust.priority?"active":"")} title="Toggle important client" onClick={()=>onUpdate(cust.id,{priority:!cust.priority})}>★</span>
+          </h3>
+          <div style={{fontSize:12,color:"var(--muted)"}}>{cust.company}</div>
+        </div>
         <button className="close-x" onClick={onClose}>✕</button>
       </div>
       <div className="drawer-body">
+        <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}>
+          <button className="btn btn-outline btn-sm" onClick={onEdit}>Edit</button>
+          <button className="btn btn-outline btn-sm" onClick={()=>{onUpdate(cust.id,{status:cust.status==="Hold"?"Active":"Hold"}); notify(cust.status==="Hold"?"Customer resumed":"Customer put on hold");}}>{cust.status==="Hold"?"Resume":"Hold"}</button>
+          {!confirmDelete ? (
+            <button className="btn btn-danger btn-sm" onClick={()=>setConfirmDelete(true)}>Delete</button>
+          ) : (
+            <>
+              <button className="btn btn-danger btn-sm" onClick={onDelete}>Confirm Delete</button>
+              <button className="btn btn-ghost btn-sm" onClick={()=>setConfirmDelete(false)}>Cancel</button>
+            </>
+          )}
+        </div>
         <div className="tabs">
           <div className={"tab "+(tab==="overview"?"active":"")} onClick={()=>setTab("overview")}>Overview</div>
           <div className={"tab "+(tab==="payments"?"active":"")} onClick={()=>setTab("payments")}>Payments</div>
@@ -1000,10 +1127,29 @@ function CustomerDetail({cust,onClose,notify,invoices}){
                 <div className="progress-bar" style={{marginTop:4}}><div className="progress-fill" style={{width:((cust.messageUsage||0)/cust.messageQuota*100)+"%"}}></div></div>
               </div>
             </div>
-            <div style={{display:"flex",gap:8,marginTop:8}}>
+            <div style={{display:"flex",gap:8,marginTop:8,marginBottom:14,flexWrap:"wrap"}}>
               <button className="btn btn-primary btn-sm" onClick={()=>notify("Renewal reminder sent via WhatsApp to "+cust.name)}>Send Renewal Reminder</button>
-              <button className="btn btn-outline btn-sm" onClick={()=>notify("Wallet top-up link sent")}>Top-up Wallet</button>
+              <button className="btn btn-outline btn-sm" onClick={checkBalanceApi}>Get Balance (API)</button>
             </div>
+            <div className="field"><label>Top-up Wallet</label>
+              <div style={{display:"flex",gap:6}}>
+                <input type="number" className="input-sm" style={{width:"100%"}} placeholder="Amount ₹" value={topupAmount} onChange={e=>setTopupAmount(e.target.value)}/>
+                <button className="btn btn-primary btn-sm" onClick={doTopup} disabled={!topupAmount}>Add</button>
+              </div>
+            </div>
+            {balanceCheck && (
+              <div className="code-block" style={{marginTop:14,fontSize:11}}>
+{`GET /customers/${balanceCheck.customer_id}/renewal-status
+{
+  "plan": "${balanceCheck.plan}",
+  "renewal_date": "${balanceCheck.renewal_date||'null'}",
+  "wallet_balance": ${balanceCheck.wallet_balance},
+  "message_usage": ${balanceCheck.message_usage},
+  "message_quota": ${balanceCheck.message_quota},
+  "status": "${balanceCheck.status}"
+}`}
+              </div>
+            )}
           </div>
         )}
         {tab==="payments" && (custInvoices.length===0 ? <div className="empty">No invoices yet.</div> :
@@ -1024,24 +1170,44 @@ const CUSTOMER_HEADERS = ["Name","Company","Mobile","Email","Plan","Services (co
 
 function Customers({customers,setCustomers,invoices,notify}){
   const [q,setQ] = useState("");
+  const [statusFilter,setStatusFilter] = useState("All");
   const [selected,setSelected] = useState(null);
   const [showForm,setShowForm] = useState(false);
+  const [editingCust,setEditingCust] = useState(null);
   const [importing,setImporting] = useState(false);
   const [importMsg,setImportMsg] = useState(null);
-  const filtered = customers.filter(c => q==="" || c.name.toLowerCase().includes(q.toLowerCase()) || (c.company||"").toLowerCase().includes(q.toLowerCase()));
+  const filtered = customers.filter(c =>
+    (q==="" || c.name.toLowerCase().includes(q.toLowerCase()) || (c.company||"").toLowerCase().includes(q.toLowerCase())) &&
+    (statusFilter==="All" || (statusFilter==="Priority" ? c.priority : c.status===statusFilter))
+  );
 
   const addCustomer = (f) => {
-    const cust = {...f, id:uid("CU"), messageUsage:0, status: f.renewalDate ? "Active" : "Active"};
+    const cust = {...f, id:uid("CU"), messageUsage:0, status: "Active"};
     setCustomers([cust,...customers]);
     setShowForm(false);
     notify("Customer added");
+  };
+  const saveEditedCustomer = (f) => {
+    setCustomers(customers.map(c=>c.id===f.id?f:c));
+    setEditingCust(null);
+    setSelected(prev => prev && prev.id===f.id ? f : prev);
+    notify("Customer updated");
+  };
+  const updateCustomer = (id,patch) => {
+    setCustomers(customers.map(c=>c.id===id?{...c,...patch}:c));
+    setSelected(prev => prev && prev.id===id ? {...prev,...patch} : prev);
+  };
+  const deleteCustomer = (id) => {
+    setCustomers(customers.filter(c=>c.id!==id));
+    setSelected(null);
+    notify("Customer deleted");
   };
 
   const exportCustomers = () => {
     const rows = customers.map(c=>({
       "Customer ID":c.id,"Name":c.name,"Company":c.company||"","Mobile":c.mobile,"Email":c.email||"",
       "Plan":c.plan,"Services":c.services.join(", "),"Start Date":c.startDate,"Renewal Date":c.renewalDate||"",
-      "Wallet Balance":c.wallet,"Message Usage":c.messageUsage||0,"Message Quota":c.messageQuota,"Status":c.status
+      "Wallet Balance":c.wallet,"Message Usage":c.messageUsage||0,"Message Quota":c.messageQuota,"Priority":c.priority?"Yes":"No","Status":c.status
     }));
     exportRows("customers-export.xlsx", rows, "Customers");
     notify("Exported "+customers.length+" customers");
@@ -1089,9 +1255,17 @@ function Customers({customers,setCustomers,invoices,notify}){
   return (
     <div>
       <div className="toolbar">
-        <div className="search-box" style={{width:340}}>
-          <span>🔎</span>
-          <input placeholder="Search customer by name to view full details..." value={q} onChange={e=>setQ(e.target.value)}/>
+        <div className="toolbar-left">
+          <div className="search-box" style={{width:300}}>
+            <span>🔎</span>
+            <input placeholder="Search customer by name..." value={q} onChange={e=>setQ(e.target.value)}/>
+          </div>
+          <div className="pill-row">
+            <span className={"filter-pill "+(statusFilter==="All"?"active":"")} onClick={()=>setStatusFilter("All")}>All</span>
+            <span className={"filter-pill "+(statusFilter==="Active"?"active":"")} onClick={()=>setStatusFilter("Active")}>Active</span>
+            <span className={"filter-pill "+(statusFilter==="Hold"?"active":"")} onClick={()=>setStatusFilter("Hold")}>Hold</span>
+            <span className={"filter-pill "+(statusFilter==="Priority"?"active":"")} onClick={()=>setStatusFilter("Priority")}>★ Important</span>
+          </div>
         </div>
         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
           <ImportExportBar
@@ -1110,13 +1284,21 @@ function Customers({customers,setCustomers,invoices,notify}){
       ) : (
         <div className="card">
           <table>
-            <thead><tr><th>Customer</th><th>Plan</th><th>Services</th><th>Renewal</th><th>Wallet</th><th>Status</th></tr></thead>
+            <thead><tr><th></th><th>Customer</th><th>Plan</th><th>Services</th><th>Renewal</th><th>Wallet</th><th>Status</th><th></th></tr></thead>
             <tbody>
               {filtered.map(c=>(
-                <tr key={c.id} className="clickable" onClick={()=>setSelected(c)}>
-                  <td><div style={{fontWeight:600}}>{c.name}</div><div style={{fontSize:11,color:"var(--muted)"}}>{c.company}</div></td>
-                  <td>{c.plan}</td><td style={{fontSize:12}}>{c.services.join(", ")||"—"}</td>
-                  <td>{c.renewalDate||"—"}</td><td>{inr(c.wallet)}</td><td><Badge>{c.status}</Badge></td>
+                <tr key={c.id} className="clickable">
+                  <td onClick={e=>e.stopPropagation()}><span className={"star-btn "+(c.priority?"active":"")} onClick={()=>updateCustomer(c.id,{priority:!c.priority})}>★</span></td>
+                  <td onClick={()=>setSelected(c)}><div style={{fontWeight:600}}>{c.name}</div><div style={{fontSize:11,color:"var(--muted)"}}>{c.company}</div></td>
+                  <td onClick={()=>setSelected(c)}>{c.plan}</td><td onClick={()=>setSelected(c)} style={{fontSize:12}}>{c.services.join(", ")||"—"}</td>
+                  <td onClick={()=>setSelected(c)}>{c.renewalDate||"—"}</td><td onClick={()=>setSelected(c)}>{inr(c.wallet)}</td><td onClick={()=>setSelected(c)}><Badge>{c.status}</Badge></td>
+                  <td onClick={e=>e.stopPropagation()}>
+                    <div className="row-actions">
+                      <button className="icon-btn" title="Edit" onClick={()=>setEditingCust(c)}>✎</button>
+                      <button className="icon-btn" title={c.status==="Hold"?"Resume":"Hold"} onClick={()=>updateCustomer(c.id,{status:c.status==="Hold"?"Active":"Hold"})}>{c.status==="Hold"?"▶":"⏸"}</button>
+                      <button className="icon-btn danger" title="Delete" onClick={()=>{if(window.confirm("Delete customer "+c.name+"?")) deleteCustomer(c.id);}}>🗑</button>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -1124,8 +1306,9 @@ function Customers({customers,setCustomers,invoices,notify}){
           {filtered.length===0 && <div className="empty">No customer found for "{q}".</div>}
         </div>
       )}
-      {selected && <CustomerDetail cust={selected} onClose={()=>setSelected(null)} notify={notify} invoices={invoices}/>}
+      {selected && <CustomerDetail cust={selected} onClose={()=>setSelected(null)} notify={notify} invoices={invoices} onUpdate={updateCustomer} onEdit={()=>{setEditingCust(selected); setSelected(null);}} onDelete={()=>deleteCustomer(selected.id)}/>}
       {showForm && <CustomerFormModal onClose={()=>setShowForm(false)} onSave={addCustomer}/>}
+      {editingCust && <CustomerFormModal editing={editingCust} onClose={()=>setEditingCust(null)} onSave={saveEditedCustomer}/>}
     </div>
   );
 }
@@ -1160,18 +1343,27 @@ function WhatsApp({notify}){
 }
 
 /* =================== CAMPAIGNS =================== */
-function CampaignFormModal({onClose,onSave}){
-  const [f,setF]=useState({name:"",channel:SOURCES[0],spend:0});
+function CampaignFormModal({onClose,onSave,editing}){
+  const [f,setF]=useState(editing || {name:"",channel:SOURCES[0],spend:0,startDate:today(),endDate:"",status:"Active"});
   const set=(k,v)=>setF({...f,[k]:v});
   return (
     <Modal onClose={onClose}>
-      <div className="drawer-head"><h3 style={{fontSize:17}}>New Campaign</h3><button className="close-x" onClick={onClose}>✕</button></div>
+      <div className="drawer-head"><h3 style={{fontSize:17}}>{editing?"Edit Campaign":"New Campaign"}</h3><button className="close-x" onClick={onClose}>✕</button></div>
       <div className="drawer-body">
         <Field label="Campaign Name"><input className="input-sm" style={{width:"100%"}} value={f.name} onChange={e=>set("name",e.target.value)}/></Field>
         <Field label="Channel"><select className="input-sm" style={{width:"100%"}} value={f.channel} onChange={e=>set("channel",e.target.value)}>{SOURCES.map(s=><option key={s}>{s}</option>)}</select></Field>
         <Field label="Spend (₹)"><input type="number" className="input-sm" style={{width:"100%"}} value={f.spend} onChange={e=>set("spend",e.target.value)}/></Field>
+        <div className="field-grid">
+          <Field label="Start Date"><input type="date" className="input-sm" style={{width:"100%"}} value={f.startDate} onChange={e=>set("startDate",e.target.value)}/></Field>
+          <Field label="End Date"><input type="date" className="input-sm" style={{width:"100%"}} value={f.endDate} onChange={e=>set("endDate",e.target.value)}/></Field>
+        </div>
+        <Field label="Status">
+          <select className="input-sm" style={{width:"100%"}} value={f.status} onChange={e=>set("status",e.target.value)}>
+            <option>Active</option><option>Finished</option>
+          </select>
+        </Field>
         <div style={{display:"flex",gap:8,marginTop:6}}>
-          <button className="btn btn-primary" disabled={!f.name} onClick={()=>onSave(f)}>Save Campaign</button>
+          <button className="btn btn-primary" disabled={!f.name} onClick={()=>onSave(f)}>{editing?"Save Changes":"Save Campaign"}</button>
           <button className="btn btn-outline" onClick={onClose}>Cancel</button>
         </div>
       </div>
@@ -1180,19 +1372,34 @@ function CampaignFormModal({onClose,onSave}){
 }
 function Campaigns({campaigns,setCampaigns,leads,notify}){
   const [showForm,setShowForm]=useState(false);
+  const [editingCmp,setEditingCmp]=useState(null);
+  const [statusFilter,setStatusFilter]=useState("All");
   const addCampaign=(f)=>{
     setCampaigns([{...f,id:uid("CMP"),spend:Number(f.spend)},...campaigns]);
     setShowForm(false); notify("Campaign added");
   };
+  const saveEditedCampaign=(f)=>{
+    setCampaigns(campaigns.map(c=>c.id===f.id?{...f,spend:Number(f.spend)}:c));
+    setEditingCmp(null); notify("Campaign updated");
+  };
+  const deleteCampaign=(id)=>{ setCampaigns(campaigns.filter(c=>c.id!==id)); notify("Campaign deleted"); };
+  const toggleStatus=(c)=>{ setCampaigns(campaigns.map(x=>x.id===c.id?{...x,status:x.status==="Finished"?"Active":"Finished"}:x)); };
+
+  const filtered = campaigns.filter(c=>statusFilter==="All"||c.status===statusFilter);
+
   return (
     <div>
       <div className="toolbar">
-        <div></div>
+        <div className="pill-row">
+          <span className={"filter-pill "+(statusFilter==="All"?"active":"")} onClick={()=>setStatusFilter("All")}>All</span>
+          <span className={"filter-pill "+(statusFilter==="Active"?"active":"")} onClick={()=>setStatusFilter("Active")}>Active</span>
+          <span className={"filter-pill "+(statusFilter==="Finished"?"active":"")} onClick={()=>setStatusFilter("Finished")}>Finished</span>
+        </div>
         <div style={{display:"flex",gap:8}}>
           <button className="btn btn-outline btn-sm" onClick={()=>{
             const rows = campaigns.map(c=>{
               const cl = leads.filter(l=>l.source===c.channel);
-              return {"Campaign":c.name,"Channel":c.channel,"Spend":c.spend,"Leads":cl.length,"Converted":cl.filter(l=>l.stage==="Converted").length};
+              return {"Campaign":c.name,"Channel":c.channel,"Spend":c.spend,"Start Date":c.startDate||"","End Date":c.endDate||"","Status":c.status,"Leads":cl.length,"Converted":cl.filter(l=>l.stage==="Converted").length};
             });
             exportRows("campaigns-export.xlsx", rows, "Campaigns"); notify("Exported "+campaigns.length+" campaigns");
           }}>⬇ Export</button>
@@ -1204,14 +1411,23 @@ function Campaigns({campaigns,setCampaigns,leads,notify}){
       ) : (
         <div className="card">
           <table>
-            <thead><tr><th>Campaign</th><th>Channel</th><th>Spend</th><th>Leads</th><th>Converted</th></tr></thead>
+            <thead><tr><th>Campaign</th><th>Channel</th><th>Spend</th><th>Start</th><th>End</th><th>Status</th><th>Leads</th><th>Converted</th><th></th></tr></thead>
             <tbody>
-              {campaigns.map(c=>{
+              {filtered.map(c=>{
                 const cl = leads.filter(l=>l.source===c.channel);
                 return (
                   <tr key={c.id}>
                     <td style={{fontWeight:600}}>{c.name}</td><td>{c.channel}</td><td>{inr(c.spend)}</td>
+                    <td>{c.startDate||"—"}</td><td>{c.endDate||"—"}</td>
+                    <td><Badge>{c.status||"Active"}</Badge></td>
                     <td>{cl.length}</td><td>{cl.filter(l=>l.stage==="Converted").length}</td>
+                    <td>
+                      <div className="row-actions">
+                        <button className="icon-btn" title="Edit" onClick={()=>setEditingCmp(c)}>✎</button>
+                        <button className="icon-btn" title="Toggle finished" onClick={()=>toggleStatus(c)}>{c.status==="Finished"?"▶":"⏸"}</button>
+                        <button className="icon-btn danger" title="Delete" onClick={()=>{if(window.confirm("Delete campaign "+c.name+"?")) deleteCampaign(c.id);}}>🗑</button>
+                      </div>
+                    </td>
                   </tr>
                 );
               })}
@@ -1220,6 +1436,7 @@ function Campaigns({campaigns,setCampaigns,leads,notify}){
         </div>
       )}
       {showForm && <CampaignFormModal onClose={()=>setShowForm(false)} onSave={addCampaign}/>}
+      {editingCmp && <CampaignFormModal editing={editingCmp} onClose={()=>setEditingCmp(null)} onSave={saveEditedCampaign}/>}
     </div>
   );
 }
@@ -1249,29 +1466,74 @@ function InvoiceFormModal({onClose,onSave,customers}){
     </Modal>
   );
 }
+const INVOICE_HEADERS = ["Customer","Amount","GST","Due Date","Status"];
+
 function Invoices({invoices,setInvoices,customers,notify}){
   const [status,setStatus] = useState("All");
   const [showForm,setShowForm] = useState(false);
+  const [importing,setImporting] = useState(false);
+  const [importMsg,setImportMsg] = useState(null);
   const filtered = invoices.filter(i=>status==="All"||i.status===status);
   const addInvoice = (f) => {
     const amount = Number(f.amount);
     const inv = {id:uid("INV"),customer:f.customer,date:today(),due:f.due||today(),amount,gst:f.gst,total:amount+f.gst,paid:0,balance:amount+f.gst,status:"Pending"};
     setInvoices([inv,...invoices]); setShowForm(false); notify("Invoice created");
   };
+
+  const importInvoices = async (e) => {
+    const file = e.target.files[0];
+    e.target.value = "";
+    if(!file) return;
+    setImporting(true); setImportMsg(null);
+    try{
+      const rows = await readSpreadsheetFile(file);
+      let added = 0, skipped = 0;
+      const newInv = [];
+      rows.forEach(r=>{
+        const customer = pick(r,["customer","customername","name"]);
+        const amount = Number(pick(r,["amount"]));
+        if(!customer || !amount){ skipped++; return; }
+        const gst = Number(pick(r,["gst"])) || Math.round(amount*0.18);
+        const paidRaw = Number(pick(r,["paid"])) || 0;
+        const due = pick(r,["duedate","due"]) || today();
+        const statusRaw = pick(r,["status"]);
+        newInv.push({
+          id: uid("INV"), customer, date: today(), due, amount, gst, total: amount+gst,
+          paid: paidRaw, balance: (amount+gst)-paidRaw,
+          status: ["Paid","Pending","Overdue"].includes(statusRaw) ? statusRaw : (paidRaw>=amount+gst ? "Paid" : "Pending"),
+        });
+        added++;
+      });
+      if(newInv.length) setInvoices([...newInv, ...invoices]);
+      setImportMsg({type:added?"ok":"error", text: added ? `Imported ${added} invoice${added===1?"":"s"}${skipped?`, skipped ${skipped} row(s) missing Customer/Amount`:""}.` : "No valid rows found — make sure Customer and Amount columns are filled in."});
+      if(added) notify("Imported "+added+" invoices from file");
+    }catch(err){
+      setImportMsg({type:"error", text:"Could not read that file. Use .xlsx, .xls or .csv exported from Excel/Google Sheets."});
+    }
+    setImporting(false);
+  };
+
   return (
     <div>
       <div className="toolbar">
         <div className="pill-row">{["All","Paid","Pending","Overdue"].map(s=><span key={s} className={"filter-pill "+(status===s?"active":"")} onClick={()=>setStatus(s)}>{s}</span>)}</div>
-        <div style={{display:"flex",gap:8}}>
-          <button className="btn btn-outline btn-sm" onClick={()=>{
-            const rows = invoices.map(i=>({"Invoice":i.id,"Customer":i.customer,"Date":i.date,"Due":i.due,"Amount":i.amount,"GST":i.gst,"Total":i.total,"Paid":i.paid,"Balance":i.balance,"Status":i.status}));
-            exportRows("invoices-export.xlsx", rows, "Invoices"); notify("Exported "+invoices.length+" invoices");
-          }}>⬇ Export</button>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          <ImportExportBar
+            label="Invoices"
+            importing={importing}
+            onImport={importInvoices}
+            onExport={()=>{
+              const rows = invoices.map(i=>({"Invoice":i.id,"Customer":i.customer,"Date":i.date,"Due":i.due,"Amount":i.amount,"GST":i.gst,"Total":i.total,"Paid":i.paid,"Balance":i.balance,"Status":i.status}));
+              exportRows("invoices-export.xlsx", rows, "Invoices"); notify("Exported "+invoices.length+" invoices");
+            }}
+            onTemplate={()=>downloadTemplate("invoices-template.xlsx", INVOICE_HEADERS, "Invoices")}
+          />
           <button className="btn btn-primary btn-sm" onClick={()=>setShowForm(true)}>+ New Invoice</button>
         </div>
       </div>
+      {importMsg && <div className={"import-summary "+(importMsg.type==="error"?"error":"")}>{importMsg.text}</div>}
       {invoices.length===0 ? (
-        <div className="card"><Empty icon="▤" title="No invoices yet" sub="Create an invoice for a customer to start billing." cta={<button className="btn btn-primary btn-sm" onClick={()=>setShowForm(true)}>+ Create your first invoice</button>}/></div>
+        <div className="card"><Empty icon="▤" title="No invoices yet" sub="Create an invoice for a customer, or import a batch from Excel." cta={<div style={{display:"flex",gap:8,justifyContent:"center"}}><button className="btn btn-primary btn-sm" onClick={()=>setShowForm(true)}>+ Create an invoice</button><label className="btn btn-outline btn-sm file-btn">⬆ Import Excel<input type="file" accept=".xlsx,.xls,.csv" onChange={importInvoices}/></label></div>}/></div>
       ) : (
         <div className="card">
           <table>
@@ -1286,6 +1548,7 @@ function Invoices({invoices,setInvoices,customers,notify}){
                     <button className="btn btn-outline btn-sm" onClick={()=>notify("Invoice sent via WhatsApp to "+inv.customer)}>✆</button>
                   </div></td>
                 </tr>
+
               ))}
             </tbody>
           </table>
@@ -1392,21 +1655,89 @@ function Support({tickets,setTickets,customers,notify}){
 }
 
 /* =================== SERVICES =================== */
-function Services({customers,notify}){
+function ServicePricingModal({service,pricing,onClose,onSave}){
+  const [f,setF] = useState(pricing || {type:"recurring", recurring:{monthly:0,halfyearly:0,yearly:0}});
+  const setType = (type) => {
+    if(type==="recurring") setF({type, recurring:f.recurring || {monthly:0,halfyearly:0,yearly:0}});
+    else if(type==="usage") setF({type, rates:f.rates && f.rates.length ? f.rates : [{category:"Standard",rate:0}]});
+    else setF({type, amount:f.amount||0});
+  };
+  const setRecurring = (k,v) => setF({...f, recurring:{...f.recurring,[k]:Number(v)}});
+  const setRate = (i,k,v) => {
+    const rates = f.rates.map((r,idx)=> idx===i ? {...r,[k]: k==="rate"?Number(v):v} : r);
+    setF({...f,rates});
+  };
+  const addRate = () => setF({...f, rates:[...f.rates,{category:"",rate:0}]});
+  const removeRate = (i) => setF({...f, rates:f.rates.filter((_,idx)=>idx!==i)});
+
+  return (
+    <Modal onClose={onClose}>
+      <div className="drawer-head"><h3 style={{fontSize:17}}>Edit Pricing — {service.name}</h3><button className="close-x" onClick={onClose}>✕</button></div>
+      <div className="drawer-body">
+        <div className="pricing-toggle">
+          <span className={"filter-pill "+(f.type==="recurring"?"active":"")} onClick={()=>setType("recurring")}>Rental (Monthly/Yearly)</span>
+          <span className={"filter-pill "+(f.type==="usage"?"active":"")} onClick={()=>setType("usage")}>Usage Rate Card</span>
+          <span className={"filter-pill "+(f.type==="onetime"?"active":"")} onClick={()=>setType("onetime")}>One-time Fee</span>
+        </div>
+
+        {f.type==="recurring" && (
+          <div className="field-grid">
+            <Field label="Monthly (₹)"><input type="number" className="input-sm" style={{width:"100%"}} value={f.recurring.monthly} onChange={e=>setRecurring("monthly",e.target.value)}/></Field>
+            <Field label="Half-Yearly (₹)"><input type="number" className="input-sm" style={{width:"100%"}} value={f.recurring.halfyearly} onChange={e=>setRecurring("halfyearly",e.target.value)}/></Field>
+            <Field label="Yearly (₹)"><input type="number" className="input-sm" style={{width:"100%"}} value={f.recurring.yearly} onChange={e=>setRecurring("yearly",e.target.value)}/></Field>
+          </div>
+        )}
+
+        {f.type==="usage" && (
+          <div>
+            <label style={{display:"block",fontSize:11.5,color:"var(--muted)",textTransform:"uppercase",letterSpacing:".4px",marginBottom:8}}>Rate Categories (₹ per message)</label>
+            {f.rates.map((r,i)=>(
+              <div className="rate-row" key={i}>
+                <input className="input-sm" placeholder="Category name" value={r.category} onChange={e=>setRate(i,"category",e.target.value)}/>
+                <input type="number" step="0.01" className="input-sm" placeholder="Rate" value={r.rate} onChange={e=>setRate(i,"rate",e.target.value)}/>
+                <button className="icon-btn danger" onClick={()=>removeRate(i)}>✕</button>
+              </div>
+            ))}
+            <button className="btn btn-outline btn-sm" onClick={addRate}>+ Add Category</button>
+          </div>
+        )}
+
+        {f.type==="onetime" && (
+          <Field label="Amount (₹)"><input type="number" className="input-sm" style={{width:"100%"}} value={f.amount} onChange={e=>setF({...f,amount:Number(e.target.value)})}/></Field>
+        )}
+
+        <div style={{display:"flex",gap:8,marginTop:16}}>
+          <button className="btn btn-primary" onClick={()=>onSave(f)}>Save Pricing</button>
+          <button className="btn btn-outline" onClick={onClose}>Cancel</button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function Services({customers,pricing,setPricing,notify}){
+  const [editing,setEditing] = useState(null);
+  const savePricing = (f) => {
+    setPricing({...pricing, [editing.id]: f});
+    setEditing(null);
+    notify("Pricing updated for "+editing.name);
+  };
   return (
     <div className="card">
       <table>
-        <thead><tr><th>Service</th><th>Price</th><th>Active Customers</th><th></th></tr></thead>
+        <thead><tr><th>Service</th><th>Pricing</th><th>Active Customers</th><th></th></tr></thead>
         <tbody>
           {SERVICES_LIST.map(s=>(
             <tr key={s.id}>
-              <td style={{fontWeight:600}}>{s.name}</td><td>{inr(s.price)}{s.unit}</td>
+              <td style={{fontWeight:600}}>{s.name}</td>
+              <td style={{fontSize:12.5}}>{servicePriceLabel(pricing[s.id])}</td>
               <td>{customers.filter(c=>c.services.includes(s.name)).length}</td>
-              <td><button className="btn btn-outline btn-sm" onClick={()=>notify("Editing "+s.name)}>Edit</button></td>
+              <td><button className="btn btn-outline btn-sm" onClick={()=>setEditing(s)}>Edit</button></td>
             </tr>
           ))}
         </tbody>
       </table>
+      {editing && <ServicePricingModal service={editing} pricing={pricing[editing.id]} onClose={()=>setEditing(null)} onSave={savePricing}/>}
     </div>
   );
 }
@@ -1559,17 +1890,59 @@ function Team({employees,setEmployees,notify}){
 
 /* =================== REPORTS =================== */
 function Reports({leads,invoices,customers,employees}){
+  const [dateFrom,setDateFrom] = useState("");
+  const [dateTo,setDateTo] = useState("");
+
+  const inRange = (dateStr) => {
+    if(!dateStr) return true;
+    if(dateFrom && dateStr < dateFrom) return false;
+    if(dateTo && dateStr > dateTo) return false;
+    return true;
+  };
+  const fLeads = leads.filter(l => inRange(l.created));
+  const fInvoices = invoices.filter(i => inRange(i.date));
+
+  const downloadReport = () => {
+    const wb_rows_sources = SOURCES.map(s=>{
+      const sl = fLeads.filter(l=>l.source===s);
+      const conv = sl.filter(l=>l.stage==="Converted").length;
+      return {"Source":s,"Leads":sl.length,"Converted":conv,"Conv. Rate %":sl.length?Math.round(conv/sl.length*100):0};
+    });
+    const wb_rows_emp = employees.map(e=>{
+      const el = fLeads.filter(l=>l.assigned===e.name);
+      return {"Executive":e.name,"Leads":el.length,"Converted":el.filter(l=>l.stage==="Converted").length};
+    });
+    const wb_rows_renewals = customers.filter(c=>c.status==="Pending").map(c=>({"Customer":c.name,"Renewal Date":c.renewalDate,"Status":c.status}));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(wb_rows_sources), "Lead Sources");
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(wb_rows_emp), "Employee Performance");
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet([{"Revenue Collected":fInvoices.reduce((s,i)=>s+i.paid,0),"Pending Balance":fInvoices.reduce((s,i)=>s+i.balance,0)}]), "Revenue");
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(wb_rows_renewals.length?wb_rows_renewals:[{"Customer":"","Renewal Date":"","Status":""}]), "Renewals");
+    XLSX.writeFile(wb, "crm-report"+(dateFrom||dateTo?`_${dateFrom||"start"}_to_${dateTo||"now"}`:"")+".xlsx");
+  };
+
   return (
-    <div className="grid-2">
+    <div>
+      <div className="toolbar">
+        <div className="toolbar-left">
+          <span style={{fontSize:12.5,color:"var(--muted)"}}>From</span>
+          <input type="date" className="input-sm" value={dateFrom} onChange={e=>setDateFrom(e.target.value)}/>
+          <span style={{fontSize:12.5,color:"var(--muted)"}}>To</span>
+          <input type="date" className="input-sm" value={dateTo} onChange={e=>setDateTo(e.target.value)}/>
+          {(dateFrom||dateTo) && <button className="btn btn-ghost btn-sm" onClick={()=>{setDateFrom("");setDateTo("");}}>Clear</button>}
+        </div>
+        <button className="btn btn-primary btn-sm" onClick={downloadReport}>⬇ Download Full Report</button>
+      </div>
+      <div className="grid-2">
       <div className="card">
         <div className="panel-head"><div className="section-title">Lead Source Report</div></div>
         <div className="panel-body">
-          {leads.length===0 ? <Empty icon="▦" title="No data yet" sub="Add leads to populate this report."/> : (
+          {fLeads.length===0 ? <Empty icon="▦" title="No data yet" sub="Add leads to populate this report."/> : (
             <table>
               <thead><tr><th>Source</th><th>Leads</th><th>Converted</th><th>Conv. Rate</th></tr></thead>
               <tbody>
                 {SOURCES.map(s=>{
-                  const sl = leads.filter(l=>l.source===s);
+                  const sl = fLeads.filter(l=>l.source===s);
                   const conv = sl.filter(l=>l.stage==="Converted").length;
                   return <tr key={s}><td>{s}</td><td>{sl.length}</td><td>{conv}</td><td>{sl.length?Math.round(conv/sl.length*100):0}%</td></tr>;
                 })}
@@ -1586,7 +1959,7 @@ function Reports({leads,invoices,customers,employees}){
               <thead><tr><th>Executive</th><th>Leads</th><th>Converted</th></tr></thead>
               <tbody>
                 {employees.map(e=>{
-                  const el = leads.filter(l=>l.assigned===e.name);
+                  const el = fLeads.filter(l=>l.assigned===e.name);
                   return <tr key={e.id}><td>{e.name}</td><td>{el.length}</td><td>{el.filter(l=>l.stage==="Converted").length}</td></tr>;
                 })}
               </tbody>
@@ -1597,9 +1970,9 @@ function Reports({leads,invoices,customers,employees}){
       <div className="card">
         <div className="panel-head"><div className="section-title">Revenue & Pending Payments</div></div>
         <div className="panel-body">
-          <StatCard label="Total Revenue Collected" value={inr(invoices.reduce((s,i)=>s+i.paid,0))}/>
+          <StatCard label="Total Revenue Collected" value={inr(fInvoices.reduce((s,i)=>s+i.paid,0))}/>
           <div style={{height:10}}></div>
-          <StatCard label="Total Pending" value={inr(invoices.reduce((s,i)=>s+i.balance,0))}/>
+          <StatCard label="Total Pending" value={inr(fInvoices.reduce((s,i)=>s+i.balance,0))}/>
         </div>
       </div>
       <div className="card">
@@ -1612,6 +1985,7 @@ function Reports({leads,invoices,customers,employees}){
             </table>
           )}
         </div>
+      </div>
       </div>
     </div>
   );
@@ -1834,6 +2208,7 @@ function App(){
   const [invoices,setInvoices] = useSyncedState("invoices", []);
   const [tickets,setTickets] = useSyncedState("tickets", []);
   const [campaigns,setCampaigns] = useSyncedState("campaigns", []);
+  const [servicePricing,setServicePricing] = useSyncedState("servicePricing", DEFAULT_SERVICE_PRICING);
   const [employees,setEmployees] = usePersistentState("employees", [SEED_ADMIN]);
 
   const notify = (msg) => {
@@ -1885,7 +2260,7 @@ function App(){
       case "invoices": return <Invoices invoices={invoices} setInvoices={setInvoices} customers={customers} notify={notify}/>;
       case "payments": return <Payments invoices={invoices} notify={notify}/>;
       case "support": return <Support tickets={tickets} setTickets={setTickets} customers={customers} notify={notify}/>;
-      case "services": return <Services customers={customers} notify={notify}/>;
+      case "services": return <Services customers={customers} pricing={servicePricing} setPricing={setServicePricing} notify={notify}/>;
       case "team": return <Team employees={employees} setEmployees={setEmployees} notify={notify}/>;
       case "reports": return <Reports leads={leads} invoices={invoices} customers={customers} employees={employees}/>;
       case "automation": return <Automation notify={notify}/>;
